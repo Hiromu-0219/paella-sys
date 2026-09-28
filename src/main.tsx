@@ -10,7 +10,14 @@ import {
   type State,
   type Status,
 } from './domain';
-import { operate, readState, resetEvent, startEvent } from './storage';
+import {
+  operate,
+  readState,
+  archiveEvent,
+  startEvent,
+  listSavedEvents,
+  openSavedEvent,
+} from './storage';
 import './style.css';
 
 type Notice = { text: string; error: boolean } | null;
@@ -79,6 +86,7 @@ function App() {
   const [state, setState] = useState<State | null>(null),
     [loaded, setLoaded] = useState(false),
     [fatal, setFatal] = useState('');
+  const [showEvents, setShowEvents] = useState(false);
   const [page, setPage] = useState<'main' | 'serve' | 'tickets' | 'history'>('main');
   const [notice, setNotice] = useState<Notice>(null),
     [busy, setBusy] = useState(false);
@@ -228,7 +236,7 @@ function App() {
         </div>
         <span className="local-label">1台の端末で管理</span>
       </header>
-      {notice && !ticket && !confirm && (
+      {notice && !ticket && !confirm && !showEvents && (
         <div
           className={`notice ${notice.error ? 'error' : 'success'}`}
           role={notice.error ? 'alert' : 'status'}
@@ -295,6 +303,9 @@ function App() {
               管理を開始する <span aria-hidden="true">→</span>
             </button>
           </form>
+          <button className="subtle wide" onClick={() => setShowEvents(true)}>
+            保存したイベント
+          </button>
           <div className="storage-note">
             データはこのブラウザに保存されます。
             <br />
@@ -473,6 +484,9 @@ function App() {
               <Pagination page={logPage} count={state.logs.length} size={50} change={setLogPage} />
             </section>
           )}
+          <button className="subtle wide" onClick={() => setShowEvents(true)}>
+            保存したイベント
+          </button>
           <footer>
             <p>
               この端末・ブラウザに保存しています。
@@ -499,6 +513,33 @@ function App() {
             </div>
           </footer>
         </main>
+      )}
+      {showEvents && (
+        <SavedEvents
+          current={state}
+          busy={busy}
+          notice={notice}
+          close={() => {
+            if (!busy) setShowEvents(false);
+          }}
+          open={async (id) => {
+            const ok = await commit(
+              () =>
+                openSavedEvent(id, state ? { id: state.event.id, revision: state.revision } : null),
+              'イベントを開きました。',
+            );
+            if (ok) {
+              setShowEvents(false);
+              setPage('main');
+              setSelected(null);
+              setConfirm(null);
+              setSearch('');
+              setFilter('ALL');
+              setTicketPage(0);
+              setLogPage(0);
+            }
+          }}
+        />
       )}
       {ticket && !confirm && (
         <Modal
@@ -592,7 +633,7 @@ function App() {
         >
           <p>
             {confirm.action === 'reset'
-              ? '現在のイベントデータが削除されます。本当に新しいイベントを開始しますか？'
+              ? '現在の整理券と操作履歴を保存して、新しいイベントの設定へ進みます。'
               : 'この操作により現在の整理券状態が変更されます。'}
           </p>
           {confirm.action === 'restore' && (
@@ -600,7 +641,7 @@ function App() {
           )}
           {confirm.action === 'reset' && (
             <>
-              <p>必要な場合は先にバックアップを保存してください。</p>
+              <p>保存したイベントは「保存したイベント」からいつでも開き直せます。</p>
               <label htmlFor="reset-name">確認のため「{state.event.name}」を入力</label>
               <input
                 id="reset-name"
@@ -621,8 +662,8 @@ function App() {
                 const ok =
                   confirm.action === 'reset'
                     ? await commit(
-                        () => resetEvent(confirm.eventId, confirm.revision),
-                        'イベントを初期化しました。',
+                        () => archiveEvent(confirm.eventId, confirm.revision),
+                        'イベントを保存しました。次のイベントを設定してください。',
                       )
                     : await act(
                         confirm.number,
@@ -645,7 +686,7 @@ function App() {
               }}
             >
               {confirm.action === 'reset'
-                ? '削除して新しく開始'
+                ? '保存して新しく開始'
                 : confirm.action === 'invalidate'
                   ? '無効にする'
                   : '戻す'}
@@ -654,6 +695,78 @@ function App() {
         </Modal>
       )}
     </>
+  );
+}
+function SavedEvents({
+  current,
+  busy,
+  notice,
+  close,
+  open,
+}: {
+  current: State | null;
+  busy: boolean;
+  notice: Notice;
+  close: () => void;
+  open: (id: string) => Promise<void>;
+}) {
+  const [events, setEvents] = useState<State[] | null>(null),
+    [error, setError] = useState(''),
+    [chosen, setChosen] = useState<State | null>(null);
+  useEffect(() => {
+    listSavedEvents()
+      .then(setEvents)
+      .catch((e) => setError(e instanceof Error ? e.message : '一覧を読み込めませんでした。'));
+  }, []);
+  return (
+    <Modal title="保存したイベント" close={close} notice={notice}>
+      {error && <p role="alert">{error}</p>}
+      {chosen ? (
+        <>
+          <h3>「{chosen.event.name}」を開きますか？</h3>
+          <p>
+            {current
+              ? `現在の「${current.event.name}」も整理券・履歴ごと保存して切り替えます。`
+              : '保存時の整理券・履歴を復元し、続きから操作できます。'}
+          </p>
+          <div className="confirm-actions">
+            <button disabled={busy} onClick={() => setChosen(null)}>
+              キャンセル
+            </button>
+            <button className="primary" disabled={busy} onClick={() => void open(chosen.event.id)}>
+              このイベントを開く
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {current && <p>現在：{current.event.name}</p>}
+          {!events && !error && <p>読み込み中…</p>}
+          {events?.length === 0 && (
+            <p>
+              保存したイベントはまだありません。「新しいイベントを開始」で現在のイベントを保存できます。
+            </p>
+          )}
+          {events?.map((event) => {
+            const c = counts(event);
+            return (
+              <section className="saved-event" key={event.event.id}>
+                <h3>{event.event.name}</h3>
+                <p>
+                  {time(event.event.createdAt)} 作成 · {event.event.ticketCount}枚
+                </p>
+                <p>
+                  提供済み {c.SERVED} · 待機中 {c.ISSUED} · 未配布 {c.UNISSUED} · 無効 {c.INVALID}
+                </p>
+                <button disabled={busy} onClick={() => setChosen(event)}>
+                  開く
+                </button>
+              </section>
+            );
+          })}
+        </>
+      )}
+    </Modal>
   );
 }
 function IssueForm({

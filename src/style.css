@@ -7,6 +7,18 @@
   font-weight: 500;
   line-height: 1.65;
 }
+.saved-event {
+  border-top: 1px solid #dce2da;
+  padding: 16px 0;
+  overflow-wrap: anywhere;
+}
+.saved-event h3 {
+  margin: 0 0 8px;
+}
+.saved-event p {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
 .single-operation {
   max-width: 680px;
   margin: 0 auto;

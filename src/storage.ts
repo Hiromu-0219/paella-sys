@@ -51,7 +51,9 @@ export async function readState(): Promise<State | null> {
   });
 }
 // Read latest state and write both ticket and log within one serialized transaction.
-async function mutate(update: (current: State | null) => State | null): Promise<State | null> {
+async function mutate(
+  update: (current: State | null, store: IDBObjectStore) => State | null,
+): Promise<State | null> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('data', 'readwrite', { durability: 'strict' });
@@ -61,7 +63,7 @@ async function mutate(update: (current: State | null) => State | null): Promise<
       failure: unknown;
     request.onsuccess = () => {
       try {
-        next = update(checked(request.result));
+        next = update(checked(request.result), store);
         if (next) store.put(next, 'current');
         else store.delete('current');
       } catch (error) {
@@ -107,5 +109,79 @@ export function resetEvent(eventId: string, revision: number) {
     if (!current || current.event.id !== eventId || current.revision !== revision)
       throw new Error('イベントが更新されました。最新の内容を確認してやり直してください。');
     return null;
+  });
+}
+
+export function archiveEvent(eventId: string, revision: number) {
+  return mutate((current, store) => {
+    if (!current || current.event.id !== eventId || current.revision !== revision)
+      throw new Error('イベントが更新されました。最新の内容を確認してやり直してください。');
+    store.put(current, `event:${current.event.id}`);
+    return null;
+  });
+}
+
+export async function listSavedEvents(): Promise<State[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('data', 'readonly');
+    const request = tx.objectStore('data').getAll(IDBKeyRange.bound('event:', 'event:\uffff'));
+    tx.oncomplete = () => {
+      db.close();
+      try {
+        resolve(
+          request.result
+            .map((value) => checked(value)!)
+            .sort((a, b) => b.event.createdAt.localeCompare(a.event.createdAt)),
+        );
+      } catch (e) {
+        reject(e);
+      }
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+}
+
+export async function openSavedEvent(
+  id: string,
+  expected: { id: string; revision: number } | null,
+): Promise<State> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('data', 'readwrite', { durability: 'strict' });
+    const store = tx.objectStore('data');
+    const currentRequest = store.get('current');
+    const savedRequest = store.get(`event:${id}`);
+    let next: State, failure: unknown;
+    savedRequest.onsuccess = () => {
+      try {
+        const current = checked(currentRequest.result),
+          saved = checked(savedRequest.result);
+        if (
+          (current?.event.id ?? null) !== (expected?.id ?? null) ||
+          (current && current.revision !== expected?.revision)
+        )
+          throw new Error('イベントが更新されました。一覧を開き直してください。');
+        if (!saved) throw new Error('保存されたイベントがありません。一覧を開き直してください。');
+        if (current) store.put(current, `event:${current.event.id}`);
+        next = { ...saved, revision: saved.revision + 1 };
+        store.put(next, 'current');
+        store.delete(`event:${id}`);
+      } catch (e) {
+        failure = e;
+        tx.abort();
+      }
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve(next);
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(failure ?? tx.error);
+    };
   });
 }

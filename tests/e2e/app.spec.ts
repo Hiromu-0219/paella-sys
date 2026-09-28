@@ -78,12 +78,12 @@ test('normal operations, rejection, confirmations, filtering and persistence', a
   await page.getByRole('button', { name: '操作履歴', exact: true }).click();
   await expect(page.locator('.log')).toHaveCount(6);
   await page.getByRole('button', { name: '新しいイベントを開始', exact: true }).click();
-  await expect(page.getByRole('button', { name: '削除して新しく開始' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '保存して新しく開始' })).toBeDisabled();
   await page.getByRole('button', { name: 'キャンセル', exact: true }).click();
   await expect(page.getByRole('heading', { name: '秋祭り パエリア出店' })).toBeVisible();
   await page.getByRole('button', { name: '新しいイベントを開始', exact: true }).click();
   await page.locator('#reset-name').fill('秋祭り パエリア出店');
-  await page.getByRole('button', { name: '削除して新しく開始' }).click();
+  await page.getByRole('button', { name: '保存して新しく開始' }).click();
   await expect(page.getByRole('button', { name: '管理を開始する' })).toBeVisible();
 });
 test('two tabs cannot distribute the same ticket twice', async ({ page, context }) => {
@@ -140,4 +140,35 @@ test('desktop and mobile controls fit viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await page.screenshot({ path: 'test-results/mobile.png', fullPage: true });
+});
+
+test('saved events survive reload and can be reopened while saving current event', async ({
+  page,
+}) => {
+  await setup(page, false, '3');
+  await page.getByRole('button', { name: 'No.001 を配布する', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('配布済みにしました');
+  await page.getByRole('button', { name: '新しいイベントを開始', exact: true }).click();
+  await page.locator('#reset-name').fill('秋祭り パエリア出店');
+  await page.getByRole('button', { name: '保存して新しく開始' }).click();
+  await page.reload();
+  await page.getByLabel('イベント名', { exact: true }).fill('翌日の出店');
+  await page.getByRole('button', { name: '管理を開始する' }).click();
+  await page.getByRole('button', { name: '保存したイベント', exact: true }).click();
+  await page.getByRole('button', { name: '開く', exact: true }).click();
+  await page.getByRole('button', { name: 'キャンセル', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '翌日の出店', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '開く', exact: true }).click();
+  await page.getByRole('button', { name: 'このイベントを開く', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: '秋祭り パエリア出店', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.stat.waiting strong')).toHaveText('1枚');
+  await page.getByRole('button', { name: '操作履歴', exact: true }).click();
+  await expect(page.locator('.log')).toHaveCount(1);
+  await page.getByRole('button', { name: '保存したイベント', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('翌日の出店');
+  await page.getByRole('button', { name: '開く', exact: true }).click();
+  await page.getByRole('button', { name: 'このイベントを開く', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '翌日の出店', exact: true })).toBeVisible();
 });
