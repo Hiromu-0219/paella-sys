@@ -293,7 +293,7 @@ function App() {
             />
             <label htmlFor="count">整理券発行枚数</label>
             <div className="suffix-input">
-              <input id="count" name="count" inputMode="numeric" defaultValue="150" required />
+              <input id="count" name="count" inputMode="numeric" defaultValue="30" required />
               <span>枚</span>
             </div>
             <p className="field-help">
